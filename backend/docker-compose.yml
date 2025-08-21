@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgis/postgis:14-3.3
+    container_name: transit_db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=my_secure_password
+      - POSTGRES_DB=best_transit
+    volumes:
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - transit_db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  engine:
+    build: ./engine
+    container_name: dispatch_engine
+    depends_on:
+      - db
+    environment:
+      - DB_NAME=best_transit
+      - DB_USER=postgres
+      - DB_PASSWORD=my_secure_password
+      - DB_HOST=db
+      - DB_PORT=5432
+    restart: on-failure
+
+volumes:
+  transit_db_data:

@@ -1,0 +1,6 @@
+psycopg2-binary
+pandas
+geopandas
+shapely
+tensorflow
+scikit-learn
