@@ -8,10 +8,10 @@ from demand_model import DemandPredictionModel
 # --- Configuration ---
 DB_CONFIG = {
     "dbname": os.getenv("DB_NAME", "best_transit"), "user": os.getenv("DB_USER", "postgres"),
-    "password": os.getenv("DB_PASSWORD", "your_password"), "host": os.getenv("DB_HOST", "db"),
+    "password": os.getenv("DB_PASSWORD", "my_secure_password"), "host": os.getenv("DB_HOST", "db"),
     "port": os.getenv("DB_PORT", "5432")
 }
-MODEL_PATH = 'nyc_bus_demand_transformer.h5'
+MODEL_PATH = 'nyc_bus_demand_transformer.keras'
 PREPROCESSOR_PATH = 'nyc_preprocessor_transformer.pkl'
 ROUTE_ENCODER_PATH = 'nyc_route_encoder_transformer.pkl'
 EFFECTIVE_BUS_CAPACITY = 50 # Avg passengers a bus can comfortably serve per hour

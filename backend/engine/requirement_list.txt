@@ -1,0 +1,8 @@
+psycopg2-binary
+numpy
+pandas
+geopandas
+shapely
+tensorflow==2.19.0
+keras==3.10.0
+scikit-learn==1.6.1

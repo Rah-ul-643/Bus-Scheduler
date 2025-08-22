@@ -21,6 +21,8 @@ class DemandPredictionModel:
     def _load_artifacts(self, model_path, preprocessor_path, route_encoder_path):
         try:
             print(f"Loading model from: {model_path}")
+            # **FIXED**: Load the model from the new .keras format.
+            # No custom_objects dictionary is needed anymore.
             self.model = tf.keras.models.load_model(model_path)
 
             print(f"Loading preprocessor from: {preprocessor_path}")
@@ -42,23 +44,40 @@ class DemandPredictionModel:
             raise
 
     def _inverse_transform_values(self, scaled_values):
+        """
+        Helper function to inverse transform the predicted passenger count.
+        """
         min_val = self.preprocessor.min_[self.passenger_col_index]
         scale_val = self.preprocessor.scale_[self.passenger_col_index]
-        return scaled_values.flatten() / scale_val + min_val
+        original_values = scaled_values.flatten() / scale_val + min_val
+        return original_values
 
     def predict(self, input_df: pd.DataFrame, time_sequence_length: int = 24):
+        """
+        Generates a demand prediction from a DataFrame of recent historical data.
+        """
         if len(input_df) < time_sequence_length:
             raise ValueError(f"Input data must have at least {time_sequence_length} rows.")
 
         df = input_df.copy()
-        df['route'] = self.route_encoder.transform(df['route'])
         
-        # Ensure columns are in the exact order the scaler expects
-        df = df[self.feature_names]
+        # Apply the same transformations as in the training script
+        df['route'] = self.route_encoder.transform(df['route'])
+        df = df[self.feature_names] # Ensure column order is correct
 
+        # Take the most recent data points for the sequence
         sequence_data = df.tail(time_sequence_length)
+
+        # Scale the data using the loaded preprocessor
         scaled_data = self.preprocessor.transform(sequence_data)
+
+        # Reshape for the Transformer model: (1, sequence_length, num_features)
         model_input = np.expand_dims(scaled_data, axis=0)
+
+        # Make the prediction
         predicted_scaled = self.model.predict(model_input)
+
+        # Inverse transform the result to get the actual passenger count
         predicted_passengers = self._inverse_transform_values(predicted_scaled)
+
         return predicted_passengers[0]

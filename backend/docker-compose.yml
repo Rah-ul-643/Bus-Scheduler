@@ -26,6 +26,7 @@ services:
       - DB_PASSWORD=my_secure_password
       - DB_HOST=db
       - DB_PORT=5432
+      - PYTHONUNBUFFERED=1
     restart: on-failure
 
 volumes:
