@@ -1,5 +1,5 @@
 -- =================================================================================
--- Final PostgreSQL Database Model for the Route-Based Scheduler (Simplified)
+-- Final PostgreSQL/PostGIS Database Model for the Route-Based Scheduler (Simplified)
 -- =================================================================================
 
 -- Ensure the PostGIS extension is enabled in your database
@@ -17,7 +17,6 @@ DROP TABLE IF EXISTS stops;
 
 -- =================================================================================
 -- Core Asset Tables
--- These tables store the essential, semi-static information about the network.
 -- =================================================================================
 
 CREATE TABLE depots (
@@ -40,21 +39,21 @@ CREATE INDEX idx_stops_geom ON stops USING GIST (geom);
 
 CREATE TABLE routes (
     route_id VARCHAR(255) PRIMARY KEY,
-    route_short_name VARCHAR(50) NOT NULL, -- Used to join with prediction data
-    start_stop_id VARCHAR(255) REFERENCES stops(stop_id) -- Foreign Key to the route's starting stop
+    route_short_name VARCHAR(50) NOT NULL,
+    start_stop_id VARCHAR(255) REFERENCES stops(stop_id),
+    end_stop_id VARCHAR(255) REFERENCES stops(stop_id) -- New column for the end point
 );
 
 
 CREATE TABLE vehicles_realtime (
     vehicle_id VARCHAR(255) PRIMARY KEY,
     status VARCHAR(50) NOT NULL CHECK (status IN ('in_service', 'available', 'maintenance')),
-    home_depot_id VARCHAR(255) REFERENCES depots(depot_id) -- Foreign Key to the home depot
+    home_depot_id VARCHAR(255) REFERENCES depots(depot_id)
 );
 
 
 -- =================================================================================
 -- Prediction & Scheduling Tables
--- These tables are populated and used by the dispatch algorithm.
 -- =================================================================================
 
 CREATE TABLE historical_bus_data (
@@ -87,7 +86,7 @@ CREATE INDEX idx_historical_data_timestamp ON historical_bus_data (transit_times
 
 CREATE TABLE route_demand_predictions (
     prediction_id SERIAL PRIMARY KEY,
-    prediction_timestamp TIMESTAMP WITH TIME ZONE NOT NULL, -- The hour for which the prediction is valid
+    prediction_timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
     route_id VARCHAR(255) NOT NULL,
     predicted_passengers INT NOT NULL,
     generated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -97,8 +96,8 @@ CREATE TABLE route_demand_predictions (
 CREATE TABLE hourly_dispatch_schedule (
     schedule_id SERIAL PRIMARY KEY,
     route_id VARCHAR(255) NOT NULL,
-    trip_id VARCHAR(255) NOT NULL UNIQUE, -- A unique ID generated for this specific scheduled trip
-    vehicle_id VARCHAR(255) NOT NULL REFERENCES vehicles_realtime(vehicle_id), -- Foreign Key to the vehicle
+    trip_id VARCHAR(255) NOT NULL UNIQUE,
+    vehicle_id VARCHAR(255) NOT NULL REFERENCES vehicles_realtime(vehicle_id),
     scheduled_departure_time TIMESTAMP WITH TIME ZONE NOT NULL,
     status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'completed', 'cancelled'))
 );
