@@ -17,10 +17,10 @@ from io import StringIO
 # --- DATABASE CONFIGURATION ---
 # Replace with your actual PostgreSQL connection details
 DB_CONFIG = {
-    "host": "your_db_host",
-    "database": "your_db_name",
-    "user": "your_db_user",
-    "password": "your_db_password",
+    "host": "localhost",
+    "database": "best_transit",
+    "user": "postgres",
+    "password": "my_secure_password",
     "port": "5432"
 }
 
