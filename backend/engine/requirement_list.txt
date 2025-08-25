@@ -3,6 +3,7 @@ numpy
 pandas
 geopandas
 shapely
+SQLAlchemy
 tensorflow==2.19.0
 keras==3.10.0
 scikit-learn==1.6.1

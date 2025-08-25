@@ -12,8 +12,8 @@ from demand_model import DemandPredictionModel
 DB_CONFIG = {
     "dbname": os.getenv("DB_NAME", "best_transit"),
     "user": os.getenv("DB_USER", "postgres"),
-    "password": os.getenv("DB_PASSWORD", "your_password"),
-    "host": os.getenv("DB_HOST", "db"),
+    "password": os.getenv("DB_PASSWORD", "my_secure_password"),
+    "host": os.getenv("DB_HOST", "localhost"),
     "port": os.getenv("DB_PORT", "5432")
 }
 db_url = f'postgresql://{DB_CONFIG["user"]}:{DB_CONFIG["password"]}@{DB_CONFIG["host"]}:{DB_CONFIG["port"]}/{DB_CONFIG["dbname"]}'
