@@ -52,23 +52,23 @@ export default function NYCBusTracker() {
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const [routesRes, dispatchesRes, geometryRes] = await Promise.all([
+      const [routesRes, dispatchesRes, localGeometryRes] = await Promise.all([
         fetch(`${API_BASE_URL}/routes`),
         fetch(`${API_BASE_URL}/dispatches`),
-        fetch(`${API_BASE_URL}/route-geometry`),
+        fetch(`/routes_coordinates.json`), // Fetch local route coordinates
       ]);
 
-      if (!routesRes.ok || !dispatchesRes.ok || !geometryRes.ok) {
+      if (!routesRes.ok || !dispatchesRes.ok || !localGeometryRes.ok) {
         throw new Error('Failed to fetch data');
       }
 
       const routesData: RouteAPIResponse[] = await routesRes.json();
       const dispatchesData: DispatchAPIResponse[] = await dispatchesRes.json();
-      const geometryData: RouteCoordinates = await geometryRes.json();
+      const localGeometryData: RouteCoordinates = await localGeometryRes.json();
       
       const updatedRoutes: Route[] = routesData.map(route => ({
         ...route,
-        coordinates: geometryData[route.route_short_name] || [],
+        coordinates: localGeometryData[route.route_short_name] || [],
         isActive: route.activebuses > 0,
       }));
       setRoutes(updatedRoutes);
@@ -159,23 +159,55 @@ export default function NYCBusTracker() {
         routes.forEach((route) => {
           if (!route.coordinates || route.coordinates.length < 2) return;
 
-          const color = route.density > 150 ? "#DC3545" : route.density > 50 ? "#FFC107" : "#28A745";
-          const dashArray = route.isActive ? undefined : "10, 10";
+          // Color coding based on density - original green, orange, red scheme
+          let color = "#28A745"; // Default green for zero/low density
+          if (route.density > 150) {
+            color = "#DC3545"; // Red for high density
+          } else if (route.density > 50) {
+            color = "#FFC107"; // Orange for medium density
+          } else {
+            color = "#28A745"; // Green for low density (including 0)
+          }
+
+          // Different line styles for active vs inactive routes
+          const weight = route.isActive ? 5 : 3;
+          const opacity = route.isActive ? 0.9 : 0.6;
+          const dashArray = route.isActive ? undefined : "8, 8";
 
           const polyline = L.polyline(route.coordinates, {
-            color: color, weight: 4, opacity: 0.8, dashArray: dashArray
+            color: color, 
+            weight: weight, 
+            opacity: opacity, 
+            dashArray: dashArray,
+            lineCap: 'round',
+            lineJoin: 'round'
           }).addTo(map);
 
+          // Enhanced tooltip with more information
           polyline.bindTooltip(
-            `<strong>${route.route_short_name}</strong><br/>
-             Predicted density: ${route.density}<br/>
-             ${route.activebuses} buses active`,
-            { permanent: false, direction: "top" }
+            `<div style="font-family: system-ui, sans-serif;">
+               <strong style="color: ${color}; font-size: 14px;">${route.route_short_name}</strong><br/>
+               <span style="font-size: 12px;">
+                 Predicted density: <strong>${route.density}</strong><br/>
+                 Active buses: <strong>${route.activebuses}</strong><br/>
+                 Status: <span style="color: ${route.isActive ? '#28A745' : '#6B7280'};">${route.isActive ? 'Active' : 'Inactive'}</span>
+               </span>
+             </div>`,
+            { 
+              permanent: false, 
+              direction: "top",
+              className: darkMode ? 'dark-tooltip' : 'light-tooltip'
+            }
           );
+
+          // Add click handler to zoom to route
+          polyline.on('click', () => {
+            map.fitBounds(polyline.getBounds(), { padding: [20, 20] });
+          });
         });
       });
     }
-  }, [map, routes]);
+  }, [map, routes, darkMode]);
 
   const getDensityBadgeClass = (density: string) => {
     if (density === "High") return "bg-red-500";
@@ -246,10 +278,10 @@ export default function NYCBusTracker() {
             <div className={`absolute bottom-4 right-4 rounded-lg shadow-md p-4 ${darkMode ? "bg-gray-800 border border-gray-700" : "bg-white"}`}>
               <h3 className={`text-sm font-semibold mb-2 ${darkMode ? "text-white" : "text-gray-900"}`}>Route Density</h3>
               <div className="space-y-2">
-                <div className="flex items-center"><div className="w-4 h-1 bg-green-500 mr-2"></div><span className={`text-xs ${darkMode ? "text-gray-300" : "text-gray-700"}`}>Low</span></div>
-                <div className="flex items-center"><div className="w-4 h-1 bg-yellow-500 mr-2"></div><span className={`text-xs ${darkMode ? "text-gray-300" : "text-gray-700"}`}>Medium</span></div>
-                <div className="flex items-center"><div className="w-4 h-1 bg-red-500 mr-2"></div><span className={`text-xs ${darkMode ? "text-gray-300" : "text-gray-700"}`}>High</span></div>
-                <div className="flex items-center mt-2"><div className="w-4 h-1 border-t border-b border-gray-400 mr-2"></div><span className={`text-xs ${darkMode ? "text-gray-300" : "text-gray-700"}`}>Inactive</span></div>
+                <div className="flex items-center"><div className="w-4 h-1 bg-green-500 mr-2"></div><span className={`text-xs ${darkMode ? "text-gray-300" : "text-gray-700"}`}>Low (0-50)</span></div>
+                <div className="flex items-center"><div className="w-4 h-1 bg-yellow-500 mr-2"></div><span className={`text-xs ${darkMode ? "text-gray-300" : "text-gray-700"}`}>Medium (51-150)</span></div>
+                <div className="flex items-center"><div className="w-4 h-1 bg-red-500 mr-2"></div><span className={`text-xs ${darkMode ? "text-gray-300" : "text-gray-700"}`}>High (150+)</span></div>
+                <div className="flex items-center mt-2"><div className="w-4 h-1 border-t-2 border-b-2 border-gray-400 mr-2" style={{borderStyle: 'dashed'}}></div><span className={`text-xs ${darkMode ? "text-gray-300" : "text-gray-700"}`}>Inactive</span></div>
               </div>
             </div>
           </main>
@@ -269,10 +301,25 @@ export default function NYCBusTracker() {
           background: ${darkMode ? "#374151" : "white"} !important;
           color: ${darkMode ? "white" : "black"} !important;
           border: 1px solid ${darkMode ? "#6B7280" : "#ccc"} !important;
+          border-radius: 6px !important;
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1) !important;
+        }
+        .dark-tooltip {
+          background: #374151 !important;
+          color: white !important;
+          border: 1px solid #6B7280 !important;
+        }
+        .light-tooltip {
+          background: white !important;
+          color: black !important;
+          border: 1px solid #ccc !important;
         }
         .overflow-y-auto {
           scrollbar-width: thin;
           scrollbar-color: ${darkMode ? "#4B5563 #374151" : "#CBD5E0 #F7FAFC"};
+        }
+        .leaflet-container {
+          font-family: system-ui, -apple-system, sans-serif !important;
         }
       `}</style>
     </>
