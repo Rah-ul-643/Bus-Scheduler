@@ -1,39 +1,47 @@
 # generate_historical_bus_data.py
-# This script generates a realistic 24-hour data snapshot for a specific list of NYC bus routes
-# based on the current time, fetching REAL HISTORICAL weather from the NWS API,
-# simulating route-specific traffic and ridership, and directly inserts the data
-# into the historical_bus_data table in a PostgreSQL database.
+# This script generates a realistic 24-hour data snapshot for a specific list of NYC bus routes.
+# It fetches real historical weather, simulates ridership, and inserts the data into a PostgreSQL database,
+# clearing the table before each run.
 
-import pandas as pd
-import numpy as np
-import holidays
-import requests
-from datetime import timedelta
+# Ensure you have the required libraries installed:
+# pip install pandas numpy holidays requests psycopg2-binary
+
 import sys
-import psycopg2
-from psycopg2 import sql
+from datetime import timedelta
 from io import StringIO
+import holidays
+import numpy as np
+import pandas as pd
+import psycopg2
+import requests
+from psycopg2 import sql
+
+import time
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # --- DATABASE CONFIGURATION ---
 # Replace with your actual PostgreSQL connection details
 DB_CONFIG = {
-    "host": "your_db_host",
-    "database": "your_db_name",
-    "user": "your_db_user",
-    "password": "your_db_password",
+    "host": "localhost",
+    "database": "best_transit",
+    "user": "postgres",
+    "password": "my_secure_password",
     "port": "5432"
 }
 
-# --- Hardcoded routes to generate data for ---
+# --- SCRIPT CONFIGURATION ---
+# Hardcoded routes to generate data for
 ROUTES = [
     'B1', 'B11', 'B12', 'B13', 'B14', 'B15', 'B16', 'B17'
 ]
+# NWS station for weather data (KNYC = Central Park, NY)
+WEATHER_STATION = "KNYC"
 
 
 class HistoricalDataGenerator:
     """
-    Generates realistic 24-hour data snapshots for the historical_bus_data table,
-    and inserts them directly into a PostgreSQL database.
+    Generates a 24-hour historical data snapshot and upserts it into a PostgreSQL database.
     """
 
     def __init__(self):
@@ -42,117 +50,156 @@ class HistoricalDataGenerator:
         self.start_datetime_utc = self.end_datetime_utc - timedelta(hours=23)
         self.us_holidays = holidays.US(state='NY', years=self.end_datetime_utc.year)
         self.weather_data = None
-        self.db_conn = None
         print("Initialized Historical Data Generator.")
         print(f"Generating data for UTC time window: {self.start_datetime_utc} to {self.end_datetime_utc}")
 
-    def _fetch_weather_data_from_nws(self):
+
+    def _fetch_weather_data(self):
         """
         Fetches the last 24 hours of weather data from the NWS API.
-        If the API returns incomplete data or null values, it simulates the missing hours
-        using time-based linear interpolation.
+        Interpolates any missing hourly data and provides detailed logs on data quality.
         """
-        print("\n--- Fetching Weather Data from api.weather.gov (NWS) ---")
-        station_id = "KNYC"  # Central Park
-        API_URL = f"https://api.weather.gov/stations/{station_id}/observations"
-        params = {"start": self.start_datetime_utc.isoformat(), "end": self.end_datetime_utc.isoformat(), "limit": 100}
+        print(f"\n--- Fetching Weather Data from NWS Station: {WEATHER_STATION} ---")
+        api_url = f"https://api.weather.gov/stations/{WEATHER_STATION}/observations"
+        params = {
+            "start": self.start_datetime_utc.isoformat(),
+            "end": self.end_datetime_utc.isoformat(),
+            "limit": 100
+        }
         headers = {"User-Agent": "Bus Scheduler Project (contact@example.com)"}
 
+        # Configure retry strategy for transient failures
+        session = requests.Session()
+        retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+        session.mount('https://', HTTPAdapter(max_retries=retries))
+
         try:
-            response = requests.get(API_URL, params=params, headers=headers, timeout=15)
+            response = session.get(api_url, params=params, headers=headers, timeout=15)
             response.raise_for_status()
             data = response.json().get('features', [])
             if not data:
-                print("WARNING: No weather observations returned. Bypassing weather data.")
+                print("❌ WARNING: No weather observations returned from API. Aborting.")
                 return False
 
-            weather_records = []
+            records = []
             for obs in data:
                 props = obs.get('properties', {})
-                temp_c = props.get('temperature', {}).get('value')
-                precip_val = props.get('precipitationLastHour', {}).get('value')
-                precip_mm = precip_val if precip_val is not None else 0
-                wind_val = props.get('windSpeed', {}).get('value')
-                wind_kmh = wind_val if wind_val is not None else 0
-                snow_val = props.get('snowDepth', {}).get('value')
-                snow_cm = (snow_val * 100) if snow_val is not None else 0
+                timestamp = props.get('timestamp')
+                if not timestamp:
+                    continue  # Skip malformed observations
 
-                weather_records.append({
-                    'datetime': pd.to_datetime(props['timestamp']),
-                    'temperature': temp_c, 'precipitation': precip_mm,
-                    'wind_speed': wind_kmh, 'snowfall': snow_cm
+                # Extract weather data with defaults
+                temp_c = props.get('temperature', {}).get('value', None)
+                precip_mm = props.get('precipitationLastHour', {}).get('value', 0)
+                wind_ms = props.get('windSpeed', {}).get('value', 0)
+                wind_kmh = wind_ms * 3.6 if wind_ms is not None else 0  # Convert m/s to km/h
+
+                # Snowfall data is often unavailable; use 0 as fallback
+                # Note: snowDepth is cumulative, not hourly snowfall
+                snow_depth_m = props.get('snowDepth', {}).get('value', 0)
+                snow_cm = snow_depth_m * 100 if snow_depth_m is not None else 0
+
+                records.append({
+                    'datetime': pd.to_datetime(timestamp),
+                    'temperature': temp_c,
+                    'precipitation': precip_mm,
+                    'wind_speed': wind_kmh,
+                    'snowfall': 0  # Set to 0 as NWS API lacks snowfallLastHour
                 })
 
-            df = pd.DataFrame(weather_records).set_index('datetime').sort_index()
-            full_hourly_range = pd.date_range(start=self.start_datetime_utc, end=self.end_datetime_utc, freq='h')
-            hourly_df = df.resample('h').mean()
+            if not records:
+                print("❌ ERROR: No valid weather records parsed from API response. Aborting.")
+                return False
 
-            if len(hourly_df) < 24:
-                print(f"WARNING: API returned only {len(hourly_df)} of 24 hours. Interpolating missing values...")
-                hourly_df = hourly_df.reindex(full_hourly_range)
-                hourly_df = hourly_df.interpolate(method='time').ffill().bfill()
+            df = pd.DataFrame(records).set_index('datetime').sort_index()
+            # Resample to hourly mean
+            hourly_df_raw = df.resample('h').mean()
+
+            # Reindex to full 24-hour range
+            full_hourly_range = pd.date_range(start=self.start_datetime_utc, end=self.end_datetime_utc, freq='h')
+            hourly_df = hourly_df_raw.reindex(full_hourly_range)
+
+            # Log data quality
+            actual_observations = hourly_df_raw.notna().sum()
+            print(f"✅ Fetched {len(hourly_df_raw)} observations with:")
+            print(f"   - Temperature: {actual_observations.get('temperature', 0)} valid points")
+            print(f"   - Precipitation: {actual_observations.get('precipitation', 0)} valid points")
+            print(f"   - Wind Speed: {actual_observations.get('wind_speed', 0)} valid points")
+            print(f"   - Snowfall (proxy): {actual_observations.get('snowfall', 0)} valid points")
+
+            if len(hourly_df_raw) < 24:
+                print(f"⚠️  Incomplete data: {len(hourly_df_raw)}/24 hourly observations. Interpolating...")
+                hourly_df = hourly_df.infer_objects(copy=False).interpolate(method='time').ffill().bfill()
+            else:
+                print("✅ Complete 24-hour dataset fetched.")
+
+            # Ensure no NaN values remain
+            if hourly_df.isna().any().any():
+                print("⚠️  Warning: Some NaN values remain after interpolation. Filling with defaults...")
+                hourly_df = hourly_df.fillna({
+                    'temperature': 20.0,  # Reasonable default for NYC
+                    'precipitation': 0,
+                    'wind_speed': 0,
+                    'snowfall': 0
+                })
 
             self.weather_data = hourly_df.reset_index().rename(columns={'index': 'datetime'})
-            print("Successfully fetched and processed weather data.")
+            print("✅ Weather data processed successfully.")
             return True
 
         except requests.exceptions.RequestException as e:
-            print(f"ERROR: Could not fetch weather data: {e}")
+            print(f"❌ ERROR: Failed to fetch weather data: {e}")
             return False
         except Exception as e:
-            print(f"ERROR: An error occurred while processing weather data: {e}")
+            print(f"❌ ERROR: Unexpected error while processing weather data: {e}")
             return False
 
-    def _insert_data_to_db(self, df):
+    def _clear_and_insert_data(self, df):
         """
-        Connects to the database and bulk-inserts the generated data.
-        Uses the fast COPY FROM method for efficiency.
+        Connects to the database, clears the target table, and bulk-inserts the generated data.
+        Uses the efficient TRUNCATE and COPY FROM methods.
         """
+        table_name = 'historical_bus_data'
         conn = None
         try:
-            print("\n--- Connecting to PostgreSQL database to insert data ---")
+            print(f"\n--- Connecting to PostgreSQL to load data into '{table_name}' ---")
             conn = psycopg2.connect(**DB_CONFIG)
-            cursor = conn.cursor()
-            print("Database connection successful.")
+            with conn.cursor() as cursor:
+                print(f"Clearing existing data from '{table_name}'...")
+                truncate_sql = sql.SQL("TRUNCATE TABLE {} RESTART IDENTITY").format(sql.Identifier(table_name))
+                cursor.execute(truncate_sql)
+                print("Table cleared successfully.")
 
-            # Use StringIO buffer for efficient bulk insert
-            buffer = StringIO()
-            df.to_csv(buffer, index=False, header=False, na_rep='NULL')
-            buffer.seek(0)
-            
-            table_name = 'historical_bus_data'
-            columns = df.columns.tolist()
+                buffer = StringIO()
+                df.to_csv(buffer, index=False, header=False)
+                buffer.seek(0)
 
-            # The COPY command is much faster for large inserts
-            copy_sql = sql.SQL("COPY {} ({}) FROM stdin WITH CSV").format(
-                sql.Identifier(table_name),
-                sql.SQL(', ').join(map(sql.Identifier, columns))
-            )
+                columns = df.columns.tolist()
+                copy_sql = sql.SQL("COPY {} ({}) FROM stdin WITH CSV").format(
+                    sql.Identifier(table_name),
+                    sql.SQL(', ').join(map(sql.Identifier, columns))
+                )
+                print(f"Executing bulk insert of {len(df)} rows...")
+                cursor.copy_expert(sql=copy_sql, file=buffer)
 
-            print(f"Executing bulk insert into '{table_name}'...")
-            cursor.copy_expert(sql=copy_sql, file=buffer)
             conn.commit()
-            
-            print(f"Successfully inserted {len(df)} rows into the database.")
+            print("Data insertion successful.")
 
         except psycopg2.Error as e:
-            print(f"ERROR: Database error during insert: {e}")
+            print(f"❌ ERROR: Database operation failed: {e}")
             if conn:
                 conn.rollback()
             sys.exit(1)
         finally:
-            if cursor:
-                cursor.close()
             if conn:
                 conn.close()
                 print("Database connection closed.")
 
-    def generate_and_insert_data(self):
+    def run(self):
         """
-        Main method to orchestrate data generation and insertion.
+        Main method to orchestrate data generation and database insertion.
         """
-        if not self._fetch_weather_data_from_nws():
-            print("Aborting data generation due to weather data fetching errors.")
+        if not self._fetch_weather_data():
             sys.exit(1)
 
         print("\n--- Generating Historical Bus Data ---")
@@ -162,40 +209,37 @@ class HistoricalDataGenerator:
         for route in ROUTES:
             df = pd.DataFrame({'datetime': hourly_range, 'route': route})
 
-            # Feature Engineering
+            # --- Feature Engineering ---
             df['hour_of_day'] = df['datetime'].dt.hour
             df['day_of_week'] = df['datetime'].dt.weekday
-            df['day_of_year'] = df['datetime'].dt.dayofyear
             df['month'] = df['datetime'].dt.month
+            df['day_of_year'] = df['datetime'].dt.dayofyear
             df['is_weekend'] = (df['day_of_week'] >= 5).astype(int)
-            df['is_public_holiday'] = df['datetime'].dt.normalize().dt.date.isin(self.us_holidays).astype(int)
+            df['is_public_holiday'] = df['datetime'].dt.date.isin(self.us_holidays).astype(int)
             df['is_local_event'] = 0
+
+            # Cyclical time features
             df['hour_sin'] = np.sin(2 * np.pi * df['hour_of_day'] / 24)
             df['hour_cos'] = np.cos(2 * np.pi * df['hour_of_day'] / 24)
             df['day_of_week_sin'] = np.sin(2 * np.pi * df['day_of_week'] / 7)
             df['day_of_week_cos'] = np.cos(2 * np.pi * df['day_of_week'] / 7)
 
-            # Merge Weather and Simulated Traffic Data
+            # --- Data Merging ---
             df = pd.merge(df, self.weather_data, on='datetime', how='left')
-            speed = np.full(24, 50.0) + np.random.normal(0, 5, 24)
-            df['avg_route_volume'] = 2500 - (speed * 30) + np.random.randint(-200, 200, 24)
+            df['avg_route_volume'] = 0
 
-            # Ridership Simulation
-            priority = 3.0
-            mean_ridership = priority * 120
-            demand_profile = {
-                0: 0.1, 1: 0.1, 2: 0.1, 3: 0.2, 4: 0.3, 5: 0.5, 6: 0.8, 7: 1.5, 8: 2.0, 9: 1.5, 10: 1.0, 11: 0.9,
-                12: 1.0, 13: 1.0, 14: 1.1, 15: 1.3, 16: 1.8, 17: 2.2, 18: 1.8, 19: 1.4, 20: 1.0, 21: 0.8, 22: 0.6, 23: 0.4
-            }
-            ridership = np.array([demand_profile.get(h, 1.0) for h in df['hour_of_day']]) * mean_ridership
-            ridership += np.random.normal(0, mean_ridership * 0.1, 24)
+            # --- Ridership Simulation ---
+            demand_profile = [0.1, 0.1, 0.1, 0.2, 0.3, 0.5, 0.8, 1.5, 2.0, 1.5, 1.0, 0.9,
+                              1.0, 1.0, 1.1, 1.3, 1.8, 2.2, 1.8, 1.4, 1.0, 0.8, 0.6, 0.4]
+            base_ridership = 360
+            ridership = np.array(demand_profile) * base_ridership
+            ridership += np.random.normal(0, base_ridership * 0.1, 24)
             ridership[df['is_weekend'] == 1] *= 0.8
-            if 'precipitation' in df.columns and not df['precipitation'].isnull().all():
-                ridership[df['precipitation'] > 0.5] *= 1.25
-            ridership[ridership < 10] = np.random.randint(0, 10, (ridership < 10).sum())
+            ridership[df['precipitation'] > 0.5] *= 1.25
+            ridership[ridership < 10] = np.random.randint(0, 10, size=(ridership < 10).sum())
             df['ridership'] = ridership.astype(int)
 
-            # Lag Features
+            # --- Lag Feature Simulation ---
             df['ridership_lag_1hr'] = df['ridership'].shift(1).fillna(df['ridership'].mean())
             df['ridership_lag_24hr'] = df['ridership'].iloc[0]
             df['ridership_lag_168hr'] = df['ridership'].mean()
@@ -207,19 +251,18 @@ class HistoricalDataGenerator:
         final_df.rename(columns={'datetime': 'transit_timestamp'}, inplace=True)
         
         final_column_order = [
-            'transit_timestamp', 'route', 'ridership', 'hour_of_day', 'day_of_week', 'day_of_year',
-            'month', 'is_weekend', 'hour_sin', 'hour_cos', 'day_of_week_sin',
-            'day_of_week_cos', 'is_public_holiday', 'is_local_event', 
+            'transit_timestamp', 'route', 'ridership', 'hour_of_day', 'day_of_week',
+            'day_of_year', 'month', 'is_weekend', 'hour_sin', 'hour_cos',
+            'day_of_week_sin', 'day_of_week_cos', 'is_public_holiday', 'is_local_event',
             'ridership_lag_1hr', 'ridership_lag_24hr', 'ridership_lag_168hr',
             'temperature', 'precipitation', 'wind_speed', 'snowfall', 'avg_route_volume'
         ]
         final_df = final_df[final_column_order]
 
-        # Insert the final DataFrame into the database
-        self._insert_data_to_db(final_df)
+        self._clear_and_insert_data(final_df)
+        print("\n--- Data Generation and Insertion Complete! ---")
 
-        print(f"\n--- Data Generation and Insertion Complete! ---")
 
 if __name__ == '__main__':
     generator = HistoricalDataGenerator()
-    generator.generate_and_insert_data()
+    generator.run()

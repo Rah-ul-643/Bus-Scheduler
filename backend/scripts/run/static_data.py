@@ -23,9 +23,6 @@ DB_CONFIG = {
 def execute_sql_from_file(file_path):
     """
     Connects to the database, reads an SQL file, and executes its content.
-
-    Args:
-        file_path (str): The relative path to the .sql file to be executed.
     """
     conn = None
     cursor = None
