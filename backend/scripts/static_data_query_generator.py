@@ -154,7 +154,7 @@ if __name__ == '__main__':
     else:
         sql_lines = generate_sql(all_routes, filtered_stops, route_start_end)
         
-        output_file = os.path.join(output_dir, 'static_data_trained_routes.sql')
+        output_file = os.path.join(output_dir, 'static_data_trained_routes2.sql')
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write('\n'.join(sql_lines))
         

@@ -7,6 +7,7 @@
 # pip install pandas numpy holidays requests psycopg2-binary
 
 import sys
+import os
 from datetime import timedelta
 from io import StringIO
 import holidays
@@ -21,13 +22,13 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # --- DATABASE CONFIGURATION ---
-# Replace with your actual PostgreSQL connection details
+
 DB_CONFIG = {
-    "host": "localhost",
-    "database": "best_transit",
-    "user": "postgres",
-    "password": "my_secure_password",
-    "port": "5432"
+    "dbname": os.getenv("DB_NAME", "best_transit"),
+    "user": os.getenv("DB_USER", "postgres"),
+    "password": os.getenv("DB_PASSWORD", "my_secure_password"),
+    "host": os.getenv("DB_HOST", "localhost"),
+    "port": os.getenv("DB_PORT", "5432")
 }
 
 # --- SCRIPT CONFIGURATION ---
@@ -104,7 +105,7 @@ class HistoricalDataGenerator:
                     'temperature': temp_c,
                     'precipitation': precip_mm,
                     'wind_speed': wind_kmh,
-                    'snowfall': 0  # Set to 0 as NWS API lacks snowfallLastHour
+                    'snowfall': snow_cm
                 })
 
             if not records:

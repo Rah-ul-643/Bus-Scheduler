@@ -13,11 +13,11 @@ SQL_FILE_PATH = '../generated_sql/static_data_trained_routes.sql'
 
 # 2. Replace with your actual PostgreSQL connection details
 DB_CONFIG = {
-    "host": "localhost",
-    "database": "best_transit",
-    "user": "postgres",
-    "password": "my_secure_password",
-    "port": "5432"
+    "dbname": os.getenv("DB_NAME", "best_transit"),
+    "user": os.getenv("DB_USER", "postgres"),
+    "password": os.getenv("DB_PASSWORD", "my_secure_password"),
+    "host": os.getenv("DB_HOST", "localhost"),
+    "port": os.getenv("DB_PORT", "5432")
 }
 
 def execute_sql_from_file(file_path):

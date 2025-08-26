@@ -101,7 +101,6 @@ class DispatchScheduler:
         """Predicts demand for the next hour based on the last 24 hours of historical data."""
         print(f"\n--- Phase A: Running Predictions for Hour Starting {target_hour.strftime('%Y-%m-%d %H:%M')} ---")
         
-        # FIX: Replaced the inefficient N+1 query with a single, efficient query for all routes.
         query = """
             WITH ranked_history AS (
                 SELECT *, ROW_NUMBER() OVER(PARTITION BY route ORDER BY transit_timestamp DESC) as rn

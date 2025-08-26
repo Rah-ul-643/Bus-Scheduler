@@ -1,0 +1,16 @@
+# Start the database service
+docker-compose up db
+
+# Activate the Python virtual environment
+source venv/bin/activate
+
+# If volume does not exist run:
+1. python scripts/run/static_data.py
+2. python scripts/run/historic_bus_data.py
+
+# Else:
+1. python scripts/clear_dynamic_data.py
+2. python scripts/run/historic_bus_data.py
+
+
+python engine/dispatch_algorithm_final.py

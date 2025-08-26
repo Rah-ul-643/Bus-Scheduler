@@ -7,11 +7,11 @@ from datetime import datetime, timedelta
 
 # --- Configuration ---
 DB_CONFIG = {
-    "dbname": "best_transit",
-    "user": "postgres",
-    "password": "my_secure_password",
-    "host": "localhost",
-    "port": "5432"
+    "dbname": os.getenv("DB_NAME", "best_transit"),
+    "user": os.getenv("DB_USER", "postgres"),
+    "password": os.getenv("DB_PASSWORD", "my_secure_password"),
+    "host": os.getenv("DB_HOST", "localhost"),
+    "port": os.getenv("DB_PORT", "5432")
 }
 
 app = Flask(__name__)
