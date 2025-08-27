@@ -482,7 +482,7 @@ export default function NYCBusTracker() {
           {/* Sidebar */}
           <aside className={`${sidebarOpen ? "w-80" : "w-0"} lg:w-80 border-r shadow-sm transition-all duration-300 overflow-hidden ${darkMode ? "bg-gray-800 border-gray-700" : "bg-white"}`}>
             <div className={`p-4 border-b transition-colors duration-300 ${darkMode ? "border-gray-700" : ""}`}>
-              <h2 className={`text-lg font-semibold transition-colors duration-300 ${darkMode ? "text-white" : "text-gray-900"}`}>Past Hour Dispatch Schedule</h2>
+              <h2 className={`text-lg font-semibold transition-colors duration-300 ${darkMode ? "text-white" : "text-gray-900"}`}>Current Hour Dispatch Schedule</h2>
             </div>
             <div className="overflow-y-auto h-full pb-20">
               <div className="p-4 space-y-3">
